@@ -28,6 +28,33 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
+## Build `.exe` (Windows)
+
+Install PyInstaller (one-time):
+
+```powershell
+python -m pip install pyinstaller
+```
+
+Build both executables from the project root:
+
+```powershell
+pyinstaller --onefile --name pick3_number_generator pick3_number_generator.py
+pyinstaller --onefile --name pick4_number_generator pick4_number_generator.py
+```
+
+Generated files:
+
+- `dist\pick3_number_generator.exe`
+- `dist\pick4_number_generator.exe`
+
+Run examples:
+
+```powershell
+.\dist\pick3_number_generator.exe Pick_3.csv -d midday -n 531
+.\dist\pick4_number_generator.exe Pick4.csv -d evening -n 6976
+```
+
 ## CSV format
 
 ### Pick 3 (`pick3_number_generator.py`)
