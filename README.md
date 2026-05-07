@@ -5,9 +5,13 @@ This repo includes two scripts with the same behavior:
 - `pick3_number_generator.py` for Pick 3 CSV data
 - `pick4_number_generator.py` for Pick 4 CSV data
 
-Each script finds every **20-number window** tied to a chosen winning result and prints each window value after **sorting its digits in ascending order** (one line per number; leading zeros drop, e.g. `620` -> `26`).
+Each script finds every **20-number window** tied to a chosen target number and prints each window value after **sorting its digits in ascending order** (one line per number; leading zeros drop, e.g. `620` -> `26`).
 
-The CSV must list draws with **the newest date first**. For every row where your target appears in the chosen **midday** or **evening** column, the script takes that row and the **nine rows above it** (nine more recent draws), then walks midday then evening for those ten rows in file order. Empty cells are skipped.
+The CSV must list draws with **the newest date first**. A row **matches** if your target appears in **midday or evening** (or both). For each match, the script takes that row and the **nine rows above it in the file** (nine draws that appear earlier in the CSV = more recent dates when the sheet is newest-first), then walks midday then evening for those ten rows in file order. That is the same 20-number window as before; it is **not** “only numbers after 531 in calendar order” unless your sheet order matches that layout.
+
+After building each window, every cell equal to the **search target** (`-n`, e.g. `531`) is **removed** before digit-sorting, console output, and duplicate analysis. Other numbers are kept even if they share digits with the target.
+
+The `-d` / `--draw` flag does **not** filter which column is searched; it only labels the **export CSV filename** and the `draw` column in that file (`midday` vs `evening`).
 
 ## Requirements
 
@@ -81,7 +85,7 @@ Some historical rows may have an empty midday or evening field; those rows stay 
 
 ## Running
 
-**All arguments are required:** the CSV path, `-d` / `--draw`, and `-n` / `--number`. There are no defaults.
+**All arguments are required:** the CSV path, `-d` / `--draw` (export label only), and `-n` / `--number`. There are no defaults.
 
 Pick 3:
 
@@ -114,8 +118,8 @@ python pick4_number_generator.py -h
 | Argument     | Short | Description |
 |--------------|-------|-------------|
 | `csv`        | —     | Path to the CSV file. It must exist or the program exits with an error. |
-| `--draw`     | `-d`  | `midday` or `evening`: the column that must equal the target. |
-| `--number`   | `-n`  | Target winning number (integer, e.g. `531`). |
+| `--draw`     | `-d`  | `midday` or `evening`: used only for the export filename and CSV `draw` column (matching uses **both** columns). |
+| `--number`   | `-n`  | Target number (integer); a row matches if midday **or** evening equals this value. |
 
 ### Examples
 
@@ -158,8 +162,9 @@ Output has two parts:
 **1 — One line per window value (transformed)**
 
 1. For each match (in file order), it walks that match’s 20 values in order (ten rows × midday then evening).
-2. For each integer `n`, it **sorts its decimal digits from smallest to largest**, joins them, converts to `int` (so leading zeros disappear), then prints that with `str`. Examples: `352` → `235`, `736` → `367`, `878` → `788`, `620` → `26`, `98` → `89`.
-3. Missing midday/evening cells are skipped.
+2. It **drops every value equal to the search target** (`-n`) from that list (only that integer; other values stay).
+3. For each remaining integer `n`, it **sorts its decimal digits from smallest to largest**, joins them, converts to `int` (so leading zeros disappear), then prints that with `str`. Examples: `352` → `235`, `736` → `367`, `878` → `788`, `620` → `26`, `98` → `89`.
+4. Missing midday/evening cells are skipped.
 
 This is **ascending digit order**, not character reversal of the string (`352` → `235`, not `253`).
 
@@ -180,8 +185,8 @@ Each run also saves the duplicate section to a CSV file in the current working d
 - Pick 3 script: `pick3_YYYY_MM_DD_midday.csv` or `pick3_YYYY_MM_DD_evening.csv`
 - Pick 4 script: `pick4_YYYY_MM_DD_midday.csv` or `pick4_YYYY_MM_DD_evening.csv`
 
-The `YYYY_MM_DD` part is based on the **target number's latest matched draw date** in the CSV (for the selected draw column), not just today's date.  
-Example: if `531` matches midday on `05/05/2026`, file is `pick3_2026_05_05_midday.csv`.
+The `YYYY_MM_DD` part is based on the **latest matched draw date** in the CSV (first match row when reading newest-first), not just today's date.  
+Example: if the newest row where `531` appears in midday or evening is `05/05/2026`, and you passed `-d midday`, the file is `pick3_2026_05_05_midday.csv`.
 
 If there are no matches for that target/draw, it falls back to today's date.
 

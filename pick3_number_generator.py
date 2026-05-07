@@ -1,11 +1,12 @@
 """
 Read Pick_3-style CSV (newest draw first) and build 20-number groups for each
-match on the midday or evening column: the match row plus the nine draws
-listed above it in the file (10 rows × Midday + Evening = 20 values).
+row where the target appears in midday or evening: the match row plus the
+nine draws listed above it in the file (10 rows × Midday + Evening = 20 values).
 
-For each window value, prints one line: the digits sorted ascending (e.g.
-620→26). Then prints a duplicate report: values that appear more than once in
-that full list, with counts and which raw draw numbers produced each value.
+For each window value (after dropping every copy of the search target `-n`),
+prints one line: the digits sorted ascending (e.g. 620→26). Then prints a
+duplicate report: values that appear more than once in that list, with counts
+and which raw draw numbers produced each value.
 """
 
 from __future__ import annotations
@@ -48,21 +49,19 @@ def group_for_match_index(draws: list[tuple[str, int | None, int | None]], i: in
     return out
 
 
-def value_for_draw(date_mid_eve: tuple[str, int | None, int | None], draw: DrawKind) -> int | None:
-    _, mid, eve = date_mid_eve
-    return mid if draw == "midday" else eve
+def row_has_target(row: tuple[str, int | None, int | None], target: int) -> bool:
+    _, mid, eve = row
+    return (mid is not None and mid == target) or (eve is not None and eve == target)
 
 
 def groups_for_target(
     draws: list[tuple[str, int | None, int | None]],
     target: int,
-    draw: DrawKind,
 ) -> list[dict]:
     results: list[dict] = []
     for i, row in enumerate(draws):
         date = row[0]
-        v = value_for_draw(row, draw)
-        if v is None or v != target:
+        if not row_has_target(row, target):
             continue
         numbers = group_for_match_index(draws, i)
         start = max(0, i - 9)
@@ -117,7 +116,9 @@ def export_duplicates_csv(
         date_part = datetime.strptime(date_text, "%m/%d/%Y").strftime("%Y_%m_%d")
     else:
         date_part = datetime.now().strftime("%Y_%m_%d")
-    out_path = Path(f"pick3_{date_part}_{draw}.csv")
+    out_dir = Path("results") / "pick3"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"pick3_{date_part}_{draw}.csv"
     with out_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["draw", "target", "digit_sorted_value", "count", "from_raw"])
@@ -130,7 +131,7 @@ def export_duplicates_csv(
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Extract 20-number windows for each midday or evening winning-number match.",
+        description="Extract 20-number windows for each row where the target hits midday or evening.",
     )
     p.add_argument(
         "csv",
@@ -142,7 +143,7 @@ def main() -> None:
         "--draw",
         choices=("midday", "evening"),
         required=True,
-        help="Which draw column must equal the target number",
+        help="Label for export CSV/filename only; matching uses midday OR evening",
     )
     p.add_argument(
         "-n",
@@ -150,7 +151,7 @@ def main() -> None:
         type=int,
         required=True,
         metavar="N",
-        help="Winning number to search for in the chosen draw column",
+        help="Target number to find in midday or evening on each match row",
     )
     args = p.parse_args()
     path = args.csv
@@ -159,14 +160,17 @@ def main() -> None:
     draw: DrawKind = args.draw
 
     draws = load_draws(path)
-    groups = groups_for_target(draws, args.number, draw)
+    groups = groups_for_target(draws, args.number)
 
     transformed: list[str] = []
     sources_for: dict[str, set[int]] = defaultdict(set)
 
+    target = args.number
     for g in groups:
         for x in g["numbers"]:
             if x is None:
+                continue
+            if x == target:
                 continue
             t = sorted_digits_asc_str(x)
             transformed.append(t)
