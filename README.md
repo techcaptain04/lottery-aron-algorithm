@@ -59,6 +59,33 @@ Run examples:
 .\dist\pick4_number_generator.exe Pick4.csv -d evening -n 6976
 ```
 
+## New client analysis feature
+
+Use this new command to analyze the **last 3 months** of draw dates and find which category wins most often for the **next date**:
+
+```powershell
+python date_analyse.py Pick_3.csv --months 3 --out date_analyse.csv --grouped-out date_analyse_grouped.csv
+```
+
+For Pick 4:
+
+```powershell
+python date_analyse.py Pick4.csv --months 3 --out date_analyse.csv --grouped-out date_analyse_grouped.csv
+```
+
+What it does:
+
+1. Loops through draw dates in the last N months (`--months`, default 3).
+2. For each date, uses that date's winning numbers as targets.
+3. Builds categories using the same transformation/grouping logic as current scripts.
+4. Looks at the **next calendar date (+1 day)** winner(s) and records which category they land in.  
+   (If the exact next day is missing in the CSV, that row is skipped.)
+5. Saves detailed rows to `date_analyse.csv`.
+6. Saves a client-friendly grouped export to `date_analyse_grouped.csv` with category columns (`cat_6`, `cat_5`, `cat_4`, `cat_3`, `cat_2`, etc.) so it is easier to read like the screenshot style.
+7. Prints the overall winner category summary.
+
+This is a **new feature script** and does not change the existing `pick3_number_generator.py` / `pick4_number_generator.py` workflow.
+
 ## CSV format
 
 ### Pick 3 (`pick3_number_generator.py`)
@@ -85,18 +112,19 @@ Some historical rows may have an empty midday or evening field; those rows stay 
 
 ## Running
 
-**All arguments are required:** the CSV path, `-d` / `--draw` (export label only), and `-n` / `--number`. There are no defaults.
+**Required arguments:** CSV path, `-d` / `--draw` (export label only), and `-n` / `--number`.  
+Optional: `--months` (default `3`) to analyze only the latest N months.
 
 Pick 3:
 
 ```text
-python pick3_number_generator.py <csv> -d {midday|evening} -n <N>
+python pick3_number_generator.py <csv> -d {midday|evening} -n <N> [--months 3]
 ```
 
 Pick 4:
 
 ```text
-python pick4_number_generator.py <csv> -d {midday|evening} -n <N>
+python pick4_number_generator.py <csv> -d {midday|evening} -n <N> [--months 3]
 ```
 
 You can put the CSV path first or last; for example, both of these are valid:
@@ -120,6 +148,7 @@ python pick4_number_generator.py -h
 | `csv`        | —     | Path to the CSV file. It must exist or the program exits with an error. |
 | `--draw`     | `-d`  | `midday` or `evening`: used only for the export filename and CSV `draw` column (matching uses **both** columns). |
 | `--number`   | `-n`  | Target number (integer); a row matches if midday **or** evening equals this value. |
+| `--months`   | —     | Keep only the latest N months of matched rows before grouping (default: `3`). |
 
 ### Examples
 
@@ -157,26 +186,28 @@ python3 pick4_number_generator.py Pick4.csv -d evening -n 6976
 
 ## Output
 
-Output has two parts:
+Console output now shows **grouped numbers only** (no raw collected-number list).
 
-**1 — One line per window value (transformed)**
+Processing flow:
 
-1. For each match (in file order), it walks that match’s 20 values in order (ten rows × midday then evening).
-2. It **drops every value equal to the search target** (`-n`) from that list (only that integer; other values stay).
-3. For each remaining integer `n`, it **sorts its decimal digits from smallest to largest**, joins them, converts to `int` (so leading zeros disappear), then prints that with `str`. Examples: `352` → `235`, `736` → `367`, `878` → `788`, `620` → `26`, `98` → `89`.
-4. Missing midday/evening cells are skipped.
+1. Build 20-value windows from matched rows (target found in midday or evening).
+2. Keep only matches in the latest `--months` window (default: 3 months).
+3. Remove values equal to the search target (`-n`).
+4. Convert each remaining value to ascending-digit form (e.g. `352` → `235`).
+5. Keep duplicates (occurrence >= 2), then group by duplicate count category.
 
-This is **ascending digit order**, not character reversal of the string (`352` → `235`, not `253`).
+Console section:
 
-**2 — Duplicate report**
+- `Category 6: ...`
+- `Category 5: ...`
+- `Category 4: ...`
+- ...
 
-After those lines, it prints a section **Duplicates (digit-sorted value appears 2+ times)** listing only transformed values that occurred more than once in part 1, **sorted by duplicate count (low to high)** and then by numeric value (low to high) for ties. Each line shows:
+Categories are shown high-to-low (like your client screenshot), and each category line contains the grouped numbers for that duplicate count.
 
-- the digit-sorted value,
-- how many times it appeared,
-- **`from raw:`** the distinct original draw numbers from the CSV that map to that value after sorting digits (e.g. `135` may list `531`, `153`, …).
+Then it prints:
 
-If nothing repeats, it prints `(none)`.
+- `Winner category (most numbers): X (count=Y)`
 
 **3 — CSV export (automatic)**
 
