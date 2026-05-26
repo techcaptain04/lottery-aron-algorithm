@@ -59,32 +59,98 @@ Run examples:
 .\dist\pick4_number_generator.exe Pick4.csv -d evening -n 6976
 ```
 
-## New client analysis feature
+## Date analysis (`date_analyse.py`)
 
-Use this new command to analyze the **last 3 months** of draw dates and find which category wins most often for the **next date**:
-
-```powershell
-python date_analyse.py Pick_3.csv --months 3 --out date_analyse.csv --grouped-out date_analyse_grouped.csv
-```
-
-For Pick 4:
+Analyse a **date range** and map each target’s **next-day** winners to hit categories (same duplicate-count logic as `pick3_number_generator.py`, e.g. `258: 4 time(s)` → category **4**).
 
 ```powershell
-python date_analyse.py Pick4.csv --months 3 --out date_analyse.csv --grouped-out date_analyse_grouped.csv
+python date_analyse.py Pick_3.csv --start-date 04/08/2025 --end-date 01/04/2026
 ```
 
-What it does:
+Pick 4:
 
-1. Loops through draw dates in the last N months (`--months`, default 3).
-2. For each date, uses that date's winning numbers as targets.
-3. Builds categories using the same transformation/grouping logic as current scripts.
-4. Looks at the **next calendar date (+1 day)** winner(s) and records which category they land in.  
-   (If the exact next day is missing in the CSV, that row is skipped.)
-5. Saves detailed rows to `date_analyse.csv`.
-6. Saves a client-friendly grouped export to `date_analyse_grouped.csv` with category columns (`cat_6`, `cat_5`, `cat_4`, `cat_3`, `cat_2`, etc.) so it is easier to read like the screenshot style.
-7. Prints the overall winner category summary.
+```powershell
+python date_analyse.py Pick4.csv --start-date 04/08/2025 --end-date 01/04/2026
+```
 
-This is a **new feature script** and does not change the existing `pick3_number_generator.py` / `pick4_number_generator.py` workflow.
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `csv` | Pick3 or Pick4 CSV path |
+| `--start-date` | First target date to analyse (inclusive), `MM/DD/YYYY` |
+| `--end-date` | Last target date to analyse (inclusive), `MM/DD/YYYY` |
+| `--out` | Optional output path (default: auto-named under `results/analyse/`) |
+
+Default output file:
+
+`results/analyse/date_analyse_YYYY_MM_DD_to_YYYY_MM_DD.csv`
+
+Example: `--start-date 04/08/2025 --end-date 01/04/2026` →  
+`results/analyse/date_analyse_2025_04_08_to_2026_01_04.csv`
+
+### What it does
+
+1. For each draw date in the range, uses that date’s **midday** and **evening** as separate target numbers.
+2. Builds categories from the **full CSV** using the same window + digit-sort + duplicate rules as the generator (category = duplicate count: 2, 3, 4, …).
+3. **Next date** = target date **+ 1 calendar day** (skipped if that day is missing in the CSV).
+4. **`hit_1_category`** = category for next-day **midday** (transformed winner).
+5. **`hit_2_category`** = category for next-day **evening** (transformed winner).
+6. Appends a **STATISTICS** section at the bottom: `category_4`, `50`, etc., plus **`category_blank`** (next-day winner had no matching duplicate category in `hit_1_category` / `hit_2_category`).
+7. Appends a **PROFIT_ANALYSIS** section for the same date range:
+   - **total_games** = calendar days × 2 (midday + evening; ~60 games per 30 days)
+   - **numbers_in_category** = average count of numbers in that category bucket (from duplicate groups)
+   - **cost_per_number** = $1.00 per number played (default)
+   - **cost_per_game** = `numbers_in_category × cost_per_number` (example: 3 numbers × $1 = **$3.00 per game**)
+   - **total_cost** = `cost_per_game × total_games` (example: $3 × 60 games = $180)
+   - **straight_hits** = how many times that category hit (`hit_1` + `hit_2`)
+   - **total_payout** = `straight_hits × straight_payout` (default $500.00)
+   - **profit** = `total_payout - total_cost`
+
+Optional flags: `--cost-per-number 1.0` and `--straight-payout 500.0`.
+
+This script does not change `pick3_number_generator.py` / `pick4_number_generator.py`.
+
+## New feature: backtest pair (`backtest.py`)
+
+This script backtests a **fixed target number** and checks which category the paired winner lands in:
+
+- If the target number appears as **MIDDAY on date D**, then evaluate the **EVENING** number on the **same date D**.
+- If the target number appears as **EVENING on date D**, then evaluate the **MIDDAY** number on the **next calendar date (D+1)**.
+
+The category definition is the **same** duplicate-count category logic as the generator scripts.
+
+### Command
+
+Pick 3:
+
+```powershell
+python backtest.py Pick_3.csv --months 3
+```
+
+Pick 4:
+
+```powershell
+python backtest.py Pick4.csv --months 3
+```
+
+To use exact dates instead of `--months`:
+
+```powershell
+python backtest.py Pick_3.csv --start-date 04/08/2025 --end-date 01/04/2026
+```
+
+### Output
+
+It saves an auto-named CSV to `results/analyse/` and prints:
+- winner category (most hits)
+- `category_blank` count (when the paired winner does not fall into any duplicate category)
+
+Optional: to filter to a single target number:
+
+```powershell
+python backtest.py Pick_3.csv -n 905 --start-date 04/08/2025 --end-date 01/04/2026
+```
 
 ## CSV format
 
