@@ -146,7 +146,20 @@ It saves an auto-named CSV to `results/analyse/backtest/` (e.g. `backtest_2025_0
 - winner category (most hits)
 - `category_blank` count (when the paired winner does not fall into any duplicate category)
 
-Each backtest row includes **`hit_category`** (duplicate count) and **`real_number_count`** (distinct raw numbers for that partner’s digit-sorted value in the target’s pool, e.g. category `4` but only **3** raws for `457`).
+Each backtest row includes:
+- **`hit_category`** — duplicate-count bucket the partner winner landed in
+- **`real_number_count`** — distinct raw numbers for the **partner’s** digit-sorted value only (e.g. `678` → **3** raws)
+- **`candidates_count`** — sum of `real_count` for **every** digit-sorted value in that `hit_category` bucket in the target’s duplicate pool (same as summing `real_count` on all `3 time(s)` lines in the generator report)
+
+The **STATISTICS** section adds:
+- **`sum_real_number_count`** — sum of row `real_number_count` for hits in that category
+- **`candidates_count`** — sum of row `candidates_count` for hits in that category (total playable numbers across those category buckets)
+- **`avg_candidates_count`** — `candidates_count ÷ count` (rounded), average pool size per hit in that category
+- **`total_cost`** — `sum_real_number_count × cost_per_number` (default **$1.00** per number)
+- **`profit_1`** — `count × straight_payout − total_cost × date_range × 2`
+- **`profit_2`** — `count × straight_payout − avg_candidates_count × date_range × 2` (`date_range` = inclusive calendar days, ×2 = midday + evening; default payout **$500**)
+
+Optional flags: `--cost-per-number 1.0`, `--straight-payout 500.0`.
 
 Optional: to filter to a single target number:
 
