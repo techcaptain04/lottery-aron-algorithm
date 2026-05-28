@@ -15,7 +15,7 @@ Category definition:
   If a digit-sorted value has count = K, then its category is K.
 
 Output:
-- Writes results to an analyse CSV in `results/analyse/`.
+- Writes results to `results/analyse/backtest/backtest_YYYY_MM_DD_to_YYYY_MM_DD.csv`.
 - Prints category statistics to console.
 """
 
@@ -27,6 +27,10 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+
+COST_PER_NUMBER = 1.0
+STRAIGHT_PAYOUT = 500.0
+DRAWS_PER_DAY = 2
 
 
 @dataclass
@@ -107,19 +111,25 @@ def group_for_match_index(draws: list[DrawRow], i: int) -> list[int | None]:
     return vals
 
 
-def build_value_to_category_map(draws: list[DrawRow], target: int) -> dict[str, int]:
+def build_category_data(
+    draws: list[DrawRow], target: int
+) -> tuple[dict[str, int], dict[str, set[int]]]:
+    """Return (digit_sorted_value->category, digit_sorted_value->distinct raw numbers)."""
     transformed: list[str] = []
+    sources_for: dict[str, set[int]] = defaultdict(set)
     for i, row in enumerate(draws):
         if not row_has_target(row, target):
             continue
         for x in group_for_match_index(draws, i):
             if x is None or x == target:
                 continue
-            transformed.append(sorted_digits_asc_str(x))
+            t = sorted_digits_asc_str(x)
+            transformed.append(t)
+            sources_for[t].add(x)
 
     counts = Counter(transformed)
-    # Only keep buckets that repeat at least twice; category is the repeat count.
-    return {value: cnt for value, cnt in counts.items() if cnt >= 2}
+    value_to_cat = {value: cnt for value, cnt in counts.items() if cnt >= 2}
+    return value_to_cat, dict(sources_for)
 
 
 def category_for_winner(cat_map: dict[str, int], winner: int | None) -> str:
@@ -130,12 +140,36 @@ def category_for_winner(cat_map: dict[str, int], winner: int | None) -> str:
     return "" if cat is None else str(cat)
 
 
-def default_out_path(csv_path: Path, start_dt: datetime, end_dt: datetime, number: int | None) -> Path:
-    stem = csv_path.stem
+def real_number_count_for_winner(sources_for: dict[str, set[int]], winner: int | None) -> str:
+    """Distinct raw draw numbers for this winner's digit-sorted form (e.g. 457 -> 3)."""
+    if winner is None:
+        return ""
+    key = sorted_digits_asc_str(winner)
+    raws = sources_for.get(key)
+    if not raws:
+        return ""
+    return str(len(raws))
+
+
+def candidates_count_for_category(
+    cat_map: dict[str, int], sources_for: dict[str, set[int]], category: int
+) -> int:
+    """Sum real_count for every digit-sorted value in this duplicate-count bucket."""
+    total = 0
+    for value, cnt in cat_map.items():
+        if cnt == category:
+            total += len(sources_for.get(value, set()))
+    return total
+
+
+def days_in_range(start_dt: datetime, end_dt: datetime) -> int:
+    return (end_dt - start_dt).days + 1
+
+
+def default_out_path(start_dt: datetime, end_dt: datetime) -> Path:
     start_part = start_dt.strftime("%Y_%m_%d")
     end_part = end_dt.strftime("%Y_%m_%d")
-    suffix = f"_target{number}" if number is not None else "_all"
-    return Path("results") / "analyse" / f"backtest_{stem}{suffix}_{start_part}_to_{end_part}.csv"
+    return Path("results") / "analyse" / "backtest" / f"backtest_{start_part}_to_{end_part}.csv"
 
 
 def main() -> None:
@@ -175,7 +209,19 @@ def main() -> None:
         "--out",
         type=Path,
         default=None,
-        help="Output CSV path (default: results/analyse/backtest_*.csv)",
+        help="Output CSV path (default: results/analyse/backtest/backtest_START_to_END.csv)",
+    )
+    p.add_argument(
+        "--cost-per-number",
+        type=float,
+        default=COST_PER_NUMBER,
+        help=f"Cost per number played (default: {COST_PER_NUMBER}); total_cost = sum_real_number_count x this",
+    )
+    p.add_argument(
+        "--straight-payout",
+        type=float,
+        default=STRAIGHT_PAYOUT,
+        help=f"Straight win payout per hit (default: {STRAIGHT_PAYOUT})",
     )
     args = p.parse_args()
 
@@ -196,14 +242,17 @@ def main() -> None:
         start_dt = latest_dt - timedelta(days=30 * args.months)
         end_dt = latest_dt
 
-    out_path = args.out or default_out_path(args.csv, start_dt, end_dt, args.number)
+    out_path = args.out or default_out_path(start_dt, end_dt)
+    date_range = days_in_range(start_dt, end_dt)
 
     draws_by_date = {date_key(r.date): r for r in draws}
-    category_cache: dict[int, dict[str, int]] = {}
+    category_cache: dict[int, tuple[dict[str, int], dict[str, set[int]]]] = {}
 
     rows_out: list[list[str]] = []
     # stats over mapped categories
     stats: Counter[int] = Counter()
+    real_sum_by_cat: Counter[int] = Counter()
+    candidates_sum_by_cat: Counter[int] = Counter()
     blank_count = 0
 
     for row in draws:
@@ -217,24 +266,36 @@ def main() -> None:
                 target = None
             if target is not None:
                 if target not in category_cache:
-                    category_cache[target] = build_value_to_category_map(draws, target)
-                cat = category_for_winner(category_cache[target], row.evening)
-            if cat == "":
-                blank_count += 1
-            else:
-                stats[int(cat)] += 1
-            rows_out.append(
-                [
-                    row.date_text,
-                    "midday_target",
-                    str(target),
-                    row.date_text,
-                    "evening",
-                    str(row.evening),
-                    sorted_digits_asc_str(row.evening),
-                    cat,
-                ]
-            )
+                    category_cache[target] = build_category_data(draws, target)
+                cat_map, sources_for = category_cache[target]
+                cat = category_for_winner(cat_map, row.evening)
+                real_cnt = real_number_count_for_winner(sources_for, row.evening)
+                candidates_cnt = ""
+                if cat != "":
+                    cat_n = int(cat)
+                    candidates_cnt = str(
+                        candidates_count_for_category(cat_map, sources_for, cat_n)
+                    )
+                    stats[cat_n] += 1
+                    if real_cnt:
+                        real_sum_by_cat[cat_n] += int(real_cnt)
+                    candidates_sum_by_cat[cat_n] += int(candidates_cnt)
+                else:
+                    blank_count += 1
+                rows_out.append(
+                    [
+                        row.date_text,
+                        "midday_target",
+                        str(target),
+                        row.date_text,
+                        "evening",
+                        str(row.evening),
+                        sorted_digits_asc_str(row.evening),
+                        cat,
+                        real_cnt,
+                        candidates_cnt,
+                    ]
+                )
 
         # Target = EVENING winner on date D -> evaluate NEXT-DAY MIDDAY
         if row.evening is not None:
@@ -248,24 +309,36 @@ def main() -> None:
                 if next_row is None or winner_midday is None:
                     continue
                 if target not in category_cache:
-                    category_cache[target] = build_value_to_category_map(draws, target)
-                cat = category_for_winner(category_cache[target], winner_midday)
-            if cat == "":
-                blank_count += 1
-            else:
-                stats[int(cat)] += 1
-            rows_out.append(
-                [
-                    row.date_text,
-                    "evening_target",
-                    str(target),
-                    next_row.date_text,
-                    "midday",
-                    str(winner_midday),
-                    sorted_digits_asc_str(winner_midday),
-                    cat,
-                ]
-            )
+                    category_cache[target] = build_category_data(draws, target)
+                cat_map, sources_for = category_cache[target]
+                cat = category_for_winner(cat_map, winner_midday)
+                real_cnt = real_number_count_for_winner(sources_for, winner_midday)
+                candidates_cnt = ""
+                if cat != "":
+                    cat_n = int(cat)
+                    candidates_cnt = str(
+                        candidates_count_for_category(cat_map, sources_for, cat_n)
+                    )
+                    stats[cat_n] += 1
+                    if real_cnt:
+                        real_sum_by_cat[cat_n] += int(real_cnt)
+                    candidates_sum_by_cat[cat_n] += int(candidates_cnt)
+                else:
+                    blank_count += 1
+                rows_out.append(
+                    [
+                        row.date_text,
+                        "evening_target",
+                        str(target),
+                        next_row.date_text,
+                        "midday",
+                        str(winner_midday),
+                        sorted_digits_asc_str(winner_midday),
+                        cat,
+                        real_cnt,
+                        candidates_cnt,
+                    ]
+                )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as f:
@@ -280,26 +353,93 @@ def main() -> None:
                 "partner_raw",
                 "partner_transformed",
                 "hit_category",
+                "real_number_count",
+                "candidates_count",
             ]
         )
         w.writerows(rows_out)
 
-        # Append statistics
         w.writerow([])
         w.writerow(["STATISTICS"])
-        w.writerow(["category", "count"])
+        w.writerow(
+            [
+                "category",
+                "count",
+                "sum_real_number_count",
+                "candidates_count",
+                "avg_candidates_count",
+                "total_cost",
+                "profit_1",
+                "profit_2",
+            ]
+        )
+        w.writerow(["cost_per_number", f"{args.cost_per_number:.2f}", "", "", "", "", "", ""])
+        w.writerow(["date_range", date_range, "", "", "", "", "", ""])
+        w.writerow(["straight_payout", f"{args.straight_payout:.2f}", "", "", "", "", "", ""])
         for cat in sorted(stats.keys(), reverse=True):
-            w.writerow([f"category_{cat}", stats[cat]])
-        w.writerow(["category_blank", blank_count])
+            real_sum = real_sum_by_cat[cat]
+            candidates_sum = candidates_sum_by_cat[cat]
+            total_cost = real_sum * args.cost_per_number
+            hit_count = stats[cat]
+            avg_candidates = round(candidates_sum / hit_count)
+            profit_1 = (
+                hit_count * args.straight_payout
+                - total_cost * date_range * DRAWS_PER_DAY
+            )
+            profit_2 = (
+                hit_count * args.straight_payout
+                - avg_candidates * date_range * DRAWS_PER_DAY
+            )
+            w.writerow(
+                [
+                    f"category_{cat}",
+                    hit_count,
+                    real_sum,
+                    candidates_sum,
+                    avg_candidates,
+                    f"{total_cost:.2f}",
+                    f"{profit_1:.2f}",
+                    f"{profit_2:.2f}",
+                ]
+            )
+        w.writerow(["category_blank", blank_count, "", "", "", "", "", ""])
 
     print(f"Saved backtest CSV: {out_path.resolve()}")
     print(f"Target date range: {start_dt.strftime('%m/%d/%Y')} to {end_dt.strftime('%m/%d/%Y')}")
+    print(f"Cost per number: ${args.cost_per_number:.2f}")
+    print(f"Date range (days): {date_range}")
+    print(f"Straight payout: ${args.straight_payout:.2f}")
     if not stats:
         print("Winner category: none (no non-blank category hits)")
     else:
         winner, hits = stats.most_common(1)[0]
         print(f"Winner category: {winner} (hits={hits})")
     print(f"category_blank: {blank_count}")
+    if stats:
+        print(
+            "Category totals (profit_1 = count x straight_payout - total_cost x date_range x 2; "
+            "profit_2 = count x straight_payout - avg_candidates_count x date_range x 2):"
+        )
+        for cat in sorted(stats.keys(), reverse=True):
+            real_sum = real_sum_by_cat[cat]
+            candidates_sum = candidates_sum_by_cat[cat]
+            avg_candidates = round(candidates_sum / stats[cat])
+            total_cost = real_sum * args.cost_per_number
+            hit_count = stats[cat]
+            profit_1 = (
+                hit_count * args.straight_payout
+                - total_cost * date_range * DRAWS_PER_DAY
+            )
+            profit_2 = (
+                hit_count * args.straight_payout
+                - avg_candidates * date_range * DRAWS_PER_DAY
+            )
+            print(
+                f"  category_{cat}: hits={hit_count}, "
+                f"sum_real_number_count={real_sum}, candidates_count={candidates_sum}, "
+                f"avg_candidates_count={avg_candidates}, "
+                f"total_cost=${total_cost:.2f}, profit_1=${profit_1:.2f}, profit_2=${profit_2:.2f}"
+            )
 
 
 if __name__ == "__main__":

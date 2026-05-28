@@ -100,7 +100,8 @@ def print_duplicate_report(dup_items: list[tuple[str, int]], sources_for: dict[s
     for key, cnt in dup_items:
         raw_list = sorted(sources_for[key])
         raw_part = ", ".join(str(x) for x in raw_list)
-        print(f"{key}: {cnt} time(s)  |  from raw: {raw_part}")
+        real_count = len(raw_list)
+        print(f"{key}: {cnt} time(s)  |  real_count: {real_count}  |  from raw: {raw_part}")
 
 
 def export_duplicates_csv(
@@ -121,11 +122,13 @@ def export_duplicates_csv(
     out_path = out_dir / f"pick4_{date_part}_{draw}.csv"
     with out_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["draw", "target", "digit_sorted_value", "count", "from_raw"])
+        w.writerow(
+            ["draw", "target", "digit_sorted_value", "count", "real_number_count", "from_raw"]
+        )
         for key, cnt in dup_items:
             raw_list = sorted(sources_for[key])
             raw_part = ", ".join(str(x) for x in raw_list)
-            w.writerow([draw, target, key, cnt, raw_part])
+            w.writerow([draw, target, key, cnt, len(raw_list), raw_part])
     return out_path
 
 

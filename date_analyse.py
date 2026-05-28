@@ -11,7 +11,7 @@ For each target date in [start, end]:
 - hit_1_category = category for next-day midday (digit-sorted duplicate count).
 - hit_2_category = category for next-day evening.
 
-Writes results/analyse/date_analyse_YYYY_MM_DD_to_YYYY_MM_DD.csv with statistics at the end.
+Writes results/analyse/date/date_analyse_YYYY_MM_DD_to_YYYY_MM_DD.csv with statistics at the end.
 """
 
 from __future__ import annotations
@@ -100,23 +100,24 @@ def group_for_match_index(draws: list[DrawRow], i: int) -> list[int | None]:
 
 
 def build_category_data(draws: list[DrawRow], target: int) -> tuple[dict[str, int], dict[int, int]]:
-    """Return (value->category, category->count of numbers to play in that bucket)."""
+    """Return (value->category, category->total distinct raw numbers to play in that bucket)."""
     transformed: list[str] = []
+    sources_for: dict[str, set[int]] = defaultdict(set)
     for i, row in enumerate(draws):
         if not row_has_target(row, target):
             continue
         for x in group_for_match_index(draws, i):
             if x is None or x == target:
                 continue
-            transformed.append(sorted_digits_asc_str(x))
+            t = sorted_digits_asc_str(x)
+            transformed.append(t)
+            sources_for[t].add(x)
     counts = Counter(transformed)
-    buckets: dict[int, set[str]] = defaultdict(set)
-    for value, cnt in counts.items():
-        if cnt >= 2:
-            buckets[cnt].add(value)
-    value_to_cat = {value: cat for cat, values in buckets.items() for value in values}
-    cat_sizes = {cat: len(values) for cat, values in buckets.items()}
-    return value_to_cat, cat_sizes
+    value_to_cat = {value: cnt for value, cnt in counts.items() if cnt >= 2}
+    real_per_cat: dict[int, int] = defaultdict(int)
+    for value, cat in value_to_cat.items():
+        real_per_cat[cat] += len(sources_for[value])
+    return value_to_cat, dict(real_per_cat)
 
 
 def category_for_winner(cat_map: dict[str, int], winner: int | None) -> str:
@@ -139,6 +140,7 @@ def default_output_path(start: datetime, end: datetime) -> Path:
     return (
         Path("results")
         / "analyse"
+        / "date"
         / f"date_analyse_{file_date_part(start)}_to_{file_date_part(end)}.csv"
     )
 
@@ -148,8 +150,9 @@ def games_in_range(start_dt: datetime, end_dt: datetime) -> int:
     return days * DRAWS_PER_DAY
 
 
-def avg_bucket_size(bucket_sizes_by_cat: dict[int, list[int]], category: int) -> int:
-    sizes = bucket_sizes_by_cat.get(category, [])
+def avg_real_numbers_in_category(real_counts_by_cat: dict[int, list[int]], category: int) -> int:
+    """Average total distinct raw numbers to play per target for this category bucket."""
+    sizes = real_counts_by_cat.get(category, [])
     if not sizes:
         return 0
     return round(sum(sizes) / len(sizes))
@@ -163,7 +166,7 @@ def write_results(
     *,
     start_dt: datetime,
     end_dt: datetime,
-    bucket_sizes_by_cat: dict[int, list[int]],
+    real_counts_by_cat: dict[int, list[int]],
     cost_per_number: float,
     straight_payout: float,
 ) -> None:
@@ -206,7 +209,7 @@ def write_results(
         w.writerow(
             [
                 "cost_per_game_formula",
-                f"numbers_in_category x cost_per_number (e.g. 3 numbers x ${cost_per_number:.2f} = ${example_cost:.2f} per game)",
+                f"real_number_count x cost_per_number (e.g. 3 numbers x ${cost_per_number:.2f} = ${example_cost:.2f} per game)",
             ]
         )
         w.writerow(["straight_payout", f"{straight_payout:.2f}"])
@@ -214,7 +217,7 @@ def write_results(
         w.writerow(
             [
                 "category",
-                "numbers_in_category",
+                "real_number_count",
                 "cost_per_game",
                 "total_games",
                 "total_cost",
@@ -223,10 +226,10 @@ def write_results(
                 "profit",
             ]
         )
-        all_cats = sorted(set(stats.keys()) | set(bucket_sizes_by_cat.keys()), reverse=True)
+        all_cats = sorted(set(stats.keys()) | set(real_counts_by_cat.keys()), reverse=True)
         for cat in all_cats:
             hits = stats.get(cat, 0)
-            numbers = avg_bucket_size(bucket_sizes_by_cat, cat)
+            numbers = avg_real_numbers_in_category(real_counts_by_cat, cat)
             # e.g. 3 numbers at $1 each -> $3.00 cost per game
             cost_per_game = numbers * cost_per_number
             total_cost = cost_per_game * games
@@ -267,7 +270,7 @@ def main() -> None:
         "--out",
         type=Path,
         default=None,
-        help="Output CSV path (default: results/analyse/date_analyse_START_to_END.csv)",
+        help="Output CSV path (default: results/analyse/date/date_analyse_START_to_END.csv)",
     )
     p.add_argument(
         "--cost-per-number",
@@ -299,7 +302,7 @@ def main() -> None:
 
     draws_by_date = {date_key(r.date): r for r in draws}
     category_cache: dict[int, dict[str, int]] = {}
-    bucket_sizes_by_cat: dict[int, list[int]] = defaultdict(list)
+    real_counts_by_cat: dict[int, list[int]] = defaultdict(list)
 
     analysis_rows: list[dict[str, str]] = []
     stats: Counter[int] = Counter()
@@ -316,10 +319,10 @@ def main() -> None:
         target_numbers = sorted({x for x in (row.midday, row.evening) if x is not None})
         for target in target_numbers:
             if target not in category_cache:
-                cat_map, cat_sizes = build_category_data(draws, target)
+                cat_map, real_per_cat = build_category_data(draws, target)
                 category_cache[target] = cat_map
-                for cat, size in cat_sizes.items():
-                    bucket_sizes_by_cat[cat].append(size)
+                for cat, real_total in real_per_cat.items():
+                    real_counts_by_cat[cat].append(real_total)
             cat_map = category_cache[target]
 
             hit_1 = category_for_winner(cat_map, next_row.midday)
@@ -359,7 +362,7 @@ def main() -> None:
         blank_count,
         start_dt=start_dt,
         end_dt=end_dt,
-        bucket_sizes_by_cat=bucket_sizes_by_cat,
+        real_counts_by_cat=real_counts_by_cat,
         cost_per_number=args.cost_per_number,
         straight_payout=args.straight_payout,
     )
@@ -379,7 +382,7 @@ def main() -> None:
     print(f"  category_blank: {blank_count}")
     print("Profit analysis (total_cost = numbers * cost_per_number * games; profit = hits * payout - total_cost):")
     for cat in sorted(stats.keys(), reverse=True):
-        numbers = avg_bucket_size(bucket_sizes_by_cat, cat)
+        numbers = avg_real_numbers_in_category(real_counts_by_cat, cat)
         hits = stats[cat]
         total_cost = numbers * args.cost_per_number * games
         total_payout = hits * args.straight_payout

@@ -80,14 +80,14 @@ python date_analyse.py Pick4.csv --start-date 04/08/2025 --end-date 01/04/2026
 | `csv` | Pick3 or Pick4 CSV path |
 | `--start-date` | First target date to analyse (inclusive), `MM/DD/YYYY` |
 | `--end-date` | Last target date to analyse (inclusive), `MM/DD/YYYY` |
-| `--out` | Optional output path (default: auto-named under `results/analyse/`) |
+| `--out` | Optional output path (default: auto-named under `results/analyse/date/`) |
 
 Default output file:
 
-`results/analyse/date_analyse_YYYY_MM_DD_to_YYYY_MM_DD.csv`
+`results/analyse/date/date_analyse_YYYY_MM_DD_to_YYYY_MM_DD.csv`
 
 Example: `--start-date 04/08/2025 --end-date 01/04/2026` →  
-`results/analyse/date_analyse_2025_04_08_to_2026_01_04.csv`
+`results/analyse/date/date_analyse_2025_04_08_to_2026_01_04.csv`
 
 ### What it does
 
@@ -99,7 +99,7 @@ Example: `--start-date 04/08/2025 --end-date 01/04/2026` →
 6. Appends a **STATISTICS** section at the bottom: `category_4`, `50`, etc., plus **`category_blank`** (next-day winner had no matching duplicate category in `hit_1_category` / `hit_2_category`).
 7. Appends a **PROFIT_ANALYSIS** section for the same date range:
    - **total_games** = calendar days × 2 (midday + evening; ~60 games per 30 days)
-   - **numbers_in_category** = average count of numbers in that category bucket (from duplicate groups)
+   - **real_number_count** = average distinct raw numbers to play in that category bucket (sum of `from raw` counts per digit-sorted value in the bucket; e.g. `457` → 3 raws even when category `count` is 4)
    - **cost_per_number** = $1.00 per number played (default)
    - **cost_per_game** = `numbers_in_category × cost_per_number` (example: 3 numbers × $1 = **$3.00 per game**)
    - **total_cost** = `cost_per_game × total_games` (example: $3 × 60 games = $180)
@@ -142,9 +142,11 @@ python backtest.py Pick_3.csv --start-date 04/08/2025 --end-date 01/04/2026
 
 ### Output
 
-It saves an auto-named CSV to `results/analyse/` and prints:
+It saves an auto-named CSV to `results/analyse/backtest/` (e.g. `backtest_2025_04_08_to_2026_01_04.csv`) and prints:
 - winner category (most hits)
 - `category_blank` count (when the paired winner does not fall into any duplicate category)
+
+Each backtest row includes **`hit_category`** (duplicate count) and **`real_number_count`** (distinct raw numbers for that partner’s digit-sorted value in the target’s pool, e.g. category `4` but only **3** raws for `457`).
 
 Optional: to filter to a single target number:
 
@@ -291,8 +293,9 @@ CSV columns are:
 
 - `draw` (`midday` or `evening`)
 - `target` (number you passed with `-n`)
-- `digit_sorted_value`
-- `count`
+- `digit_sorted_value` (digit-sorted form, e.g. `457`)
+- `count` (how many times that value appeared in the pooled windows — the **category**)
+- `real_number_count` (how many **distinct** raw draw numbers map to it, e.g. `574, 745, 754` → **3** even when `count` is 4)
 - `from_raw` (comma-separated original numbers that map to that digit-sorted value)
 
 ## File reference
